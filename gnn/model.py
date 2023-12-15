@@ -38,14 +38,15 @@ class GNNModel(nn.Module):
             x = x.relu()
 
         x = self.fc(x)
-
+        
+        '''
         if 'ptr' in data:
             x = self.aggr(x, ptr=data.ptr) #computes per-graph embedding
 
             assert x.shape[0]==len(data.ptr)-1, f"pred.shape={pred.shape}"
         else:
             x = x.mean(dim=0).unsqueeze(0) #average across nodes
-
+        '''
         return x
     
 # Define the encoding model (RNN) architecture
