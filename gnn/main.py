@@ -35,11 +35,11 @@ for i in range(len(data)):
     assert len(data[i][2])==len(data_emb[i][1])
 
 #define InputEncoder (RNN) and GNN
-in_dim = 8
-hidden_dim = 16
-num_layers = 7
+in_dim        = 8
+hidden_dim    = 16
+num_layers    = 7
 bidirectional = True
-out_dim    = 128
+out_dim       = 128
 
 int_dir = 2 if bidirectional else 1
 

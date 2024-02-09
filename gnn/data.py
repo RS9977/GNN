@@ -291,7 +291,7 @@ def process_bb(bb_list):
 
             
                 if line.find('__MEM') > -1:
-                    line = 'M'
+                    line = 'MR'
                     found = True
 
                 if line.find("PHI") > -1:

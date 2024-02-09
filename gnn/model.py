@@ -5,13 +5,17 @@ from torch_geometric.nn.aggr import MeanAggregation
 from torch.nn.utils.rnn import pad_sequence,\
                                 pack_sequence,\
                                 pad_packed_sequence
+from torch_geometric.data import Data
+from torch.nn.utils.rnn import unpack_sequence
+import copy
 
 # Define the GNN architecture
 class GNNModel(nn.Module):
     def __init__(self,
                  in_dim=2,
                  out_dim=20,
-                 layer_dims=[16, 32]):
+                 layer_dims=[16, 32],
+                 name="gnn"):
 
         super().__init__()
 
@@ -81,3 +85,40 @@ class InputEncoder(nn.Module):
         out, (h_n, c_n) = self.lstm(embs)
 
         return out, h_n, c_n
+
+
+class IntegratedModel(nn.Module):
+    def __init__(self, 
+                 word_to_idx,
+                 in_dim_lstm,
+                 hidden_dim,
+                 num_layers,
+                 bidirectional=True,
+                 out_dim=20,
+                 layer_dims=[16, 32]):
+        
+        super().__init__()
+        self.lstm_encoder = InputEncoder(word_to_idx, 
+                            in_dim=in_dim_lstm, 
+                            hidden_dim=hidden_dim, 
+                            num_layers=num_layers, 
+                            bidirectional=bidirectional)
+        
+        self.gnn_model = GNNModel(in_dim=(int(bidirectional)+1)*hidden_dim,
+                         out_dim=out_dim,
+                         layer_dims=[16, 32])
+    
+    def forward(self, node_sequences, edge_index):
+        # node_sequences: shape (num_nodes, seq_length, lstm_input_size)
+        # edge_index: shape (2, num_edges)
+        out, h, c = self.lstm_encoder(node_sequences)
+        node_feats = torch.vstack([k[-1] for k in unpack_sequence(out)])
+        original_array = node_feats.detach().numpy()
+        deep_copied_array = copy.deepcopy(original_array)
+        out_act = torch.from_numpy(deep_copied_array)
+        node_feats[:,16:] = -1
+        graph = Data(edge_index=edge_index,
+                        x=node_feats)
+        gnn_output = self.gnn_model(graph)
+        
+        return gnn_output, out_act
