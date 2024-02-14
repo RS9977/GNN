@@ -8,6 +8,8 @@ from torch.nn.utils.rnn import pad_sequence,\
 from torch_geometric.data import Data
 from torch.nn.utils.rnn import unpack_sequence
 import copy
+from torch.nn import LeakyReLU
+
 
 # Define the GNN architecture
 class GNNModel(nn.Module):
@@ -15,7 +17,8 @@ class GNNModel(nn.Module):
                  in_dim=2,
                  out_dim=20,
                  layer_dims=[16, 32],
-                 name="gnn"):
+                 name="gnn",
+                 dropout_prob=0.5):
 
         super().__init__()
 
@@ -31,7 +34,7 @@ class GNNModel(nn.Module):
             self.conv_layers.append(layer)
 
         self.fc = nn.Linear(layer_dims[-1], out_dim)
-
+        self.leaky_relu = LeakyReLU(negative_slope=0.01)
         self.aggr = MeanAggregation()
 
     def forward(self, data):
@@ -39,7 +42,7 @@ class GNNModel(nn.Module):
         
         for l in self.conv_layers:
             x = l(x, edge_index)
-            x = x.relu()
+            x = self.leaky_relu(x)
 
         x = self.fc(x)
         
@@ -60,7 +63,8 @@ class InputEncoder(nn.Module):
                  in_dim,
                  hidden_dim,
                  num_layers,
-                 bidirectional=True):
+                 bidirectional=True,
+                 dropout_prob=0.5):
         
         super().__init__()
         
@@ -76,14 +80,14 @@ class InputEncoder(nn.Module):
                             num_layers=num_layers,
                             batch_first=True,
                             bidirectional=bidirectional)
-                
+        self.leaky_relu = LeakyReLU(negative_slope=0.01)
     
     def forward(self, x):
         #x should be per-node bb ins indices
-        embs = pack_sequence([self.emb(bb) for bb in x], enforce_sorted=False)
+        embs = pack_sequence([self.leaky_relu(self.emb(bb)) for bb in x], enforce_sorted=False)
         
         out, (h_n, c_n) = self.lstm(embs)
-
+        #out = self.leaky_relu(out) # Apply Leaky ReLU
         return out, h_n, c_n
 
 

@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 
+from tokenizer import process_bb_tokenizer
+
 '''
 Take from Reza's colab notebook
 '''
@@ -201,7 +203,7 @@ def live_feat(filename, function_num):
         
 
     ##########################################################################
-    print(var_all)
+    #print(var_all)
     BB_ind = 0
     adj_list = []
     for BB_local_adj in BB_adjacent_mat_global[function_num]:
@@ -254,6 +256,8 @@ def extract_a_op_b(input_string):
         return op
     else:
         return None
+
+
 
 def process_bb(bb_list):
     ops = []
@@ -332,10 +336,11 @@ def read_graphs_for_rnn(folder, func=live_feat, **kwargs):
 
         bb_list = g[1]  # list of bb instructions
 
-        ops, ops_clean = process_bb(bb_list)
-
-        data.append((g[0], ops, ops_clean))
-
+        #ops, ops_clean = process_bb(bb_list)
+        #data.append((g[0], ops, ops_clean))
+        #print(bb_list)
+        tokens = process_bb_tokenizer(bb_list)
+        data.append((g[0], tokens))
     #assert len(data) == len(files)
 
     return data
@@ -344,8 +349,8 @@ def read_graphs_for_rnn(folder, func=live_feat, **kwargs):
 def map_ins_to_idx(data, word_to_idx):
     data_emb = []
     for g in data:
-        edge_index, _, bb_ins = g
-
+        #edge_index, _, bb_ins = g
+        edge_index, bb_ins = g
         bb_ins_idx = []
         for bb in bb_ins:
             bb_ins_idx.append(torch.tensor([word_to_idx[k] for k in bb]))
@@ -361,15 +366,16 @@ def prepare_data_vocab(folder,
                        **kwargs):
 
     data = read_graphs_for_rnn(folder, func=func, **kwargs)
-
+    
     vocab = []
-    for app in [d[2] for d in data]:
+    #for app in [d[2] for d in data]:
+    for app in [d[1] for d in data]:
         for bb in app:
             for line in bb:
                 vocab.append(line)
     
     vocab = np.unique(vocab)
-
+    
     word_to_idx = dict(zip(vocab, np.arange(len(vocab))))
     idx_to_word = dict(zip(np.arange(len(vocab)), vocab))
 
