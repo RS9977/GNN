@@ -356,6 +356,10 @@ def map_ins_to_idx(data, word_to_idx):
             bb_ins_idx.append(torch.tensor([word_to_idx[k] for k in bb]))
 
         # bb_ins_idx = pad_sequence(bb_ins_idx, padding_value=len(word_to_idx)+1)
+        if len(edge_index) != 0:
+            edge_index = torch.tensor(edge_index).T
+        else:
+            edge_index = torch.tensor([[0],[0]])
         data_emb.append((edge_index, bb_ins_idx))
 
     return data_emb

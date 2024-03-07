@@ -9,7 +9,7 @@ from torch_geometric.data import Data
 from torch.nn.utils.rnn import unpack_sequence
 import copy
 from torch.nn import LeakyReLU
-
+import torch.nn.utils.rnn as rnn  
 
 # Define the GNN architecture
 class GNNModel(nn.Module):
@@ -85,13 +85,140 @@ class InputEncoder(nn.Module):
     def forward(self, x):
         #x should be per-node bb ins indices
         embs = pack_sequence([self.leaky_relu(self.emb(bb)) for bb in x], enforce_sorted=False)
-        
         out, (h_n, c_n) = self.lstm(embs)
+        
         #out = self.leaky_relu(out) # Apply Leaky ReLU
         return out, h_n, c_n
 
 
+class AutoEncoder(nn.Module):
+    def __init__(self,
+                 word_to_idx,
+                 in_dim,
+                 hidden_dim,
+                 num_layers,
+                 output_size,
+                 bidirectional=True,
+                 dropout_prob=0.5):
+        
+        super().__init__()
+        
+        self.word_to_idx = word_to_idx
+        vocab_size = len(word_to_idx)
+
+        self.emb = nn.Embedding(num_embeddings=vocab_size+1,
+                                embedding_dim=in_dim,
+                                padding_idx=-1)
+        
+        self.lstm = nn.LSTM(input_size=in_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=num_layers,
+                            batch_first=True,
+                            bidirectional=bidirectional)
+        
+        int_dir = 2 if bidirectional else 1
+        
+        self.lstm_decoder = nn.LSTM(input_size=hidden_dim*int_dir,
+                                    hidden_size=4,#output_size,
+                                    num_layers=num_layers,
+                                    batch_first=True,
+                                    bidirectional=bidirectional)
+
+        self.leaky_relu = LeakyReLU(negative_slope=0.01)
+    
+    def forward(self, x):
+        #x should be per-node bb ins indices
+        embs = pack_sequence([self.leaky_relu(self.emb(bb)) for bb in x], enforce_sorted=False)
+        intput_embs = [self.emb(bb) for bb in x]
+        
+
+        out, (h_n, c_n) = self.lstm(embs)
+        node_feats = torch.vstack([k[-1] for k in unpack_sequence(out)])
+        original_array = node_feats.detach().numpy()
+        deep_copied_array = copy.deepcopy(original_array)
+        out_act = torch.from_numpy(deep_copied_array)
+
+        decoded_outputs_temps = []
+        decoded_outputs       = []
+        for i in range(len(x)):
+            current_sequence = out_act[i].repeat(len(x[i]), 1)
+            for j in range(len(x[i])):
+                
+                output, (hidden_state, cell_state) = self.lstm_decoder(current_sequence)
+                #print(output.size())
+                output_f = torch.vstack([k[-1] for k in (output.T)])
+                #print(output_f.size())
+                decoded_outputs_temps.append(output_f)
+            decoded_outputs.append(decoded_outputs_temps)
+
+        return decoded_outputs, intput_embs
+
+
+class AutoEncoderHidden(nn.Module):
+    def __init__(self,
+                 word_to_idx,
+                 in_dim,
+                 hidden_dim,
+                 num_layers,
+                 output_size,
+                 bidirectional=True,
+                 dropout_prob=0.5):
+        
+        super().__init__()
+        
+        self.word_to_idx = word_to_idx
+        vocab_size = len(word_to_idx)
+
+        self.emb = nn.Embedding(num_embeddings=vocab_size+1,
+                                embedding_dim=in_dim,
+                                padding_idx=-1)
+        
+        self.lstm = nn.LSTM(input_size=in_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=num_layers,
+                            batch_first=True,
+                            bidirectional=bidirectional)
+        
+        int_dir = 2 if bidirectional else 1
+        
+        self.lstm_decoder = nn.LSTM(input_size=hidden_dim*int_dir,
+                                    hidden_size=4,#output_size,
+                                    num_layers=num_layers,
+                                    batch_first=True,
+                                    bidirectional=bidirectional)
+
+        self.leaky_relu = LeakyReLU(negative_slope=0.01)
+    
+    def forward(self, x):
+        #x should be per-node bb ins indices
+        embs = pack_sequence([self.leaky_relu(self.emb(bb)) for bb in x], enforce_sorted=False)
+        intput_embs = [self.emb(bb) for bb in x]
+        
+
+        out, (h_n, c_n) = self.lstm(embs)
+        node_feats = torch.vstack([k[-1] for k in unpack_sequence(out)])
+        original_array = node_feats.detach().numpy()
+        deep_copied_array = copy.deepcopy(original_array)
+        out_act = torch.from_numpy(deep_copied_array)
+
+        decoded_outputs_temps = []
+        decoded_outputs       = []
+        for i in range(len(x)):
+            current_sequence = out_act[i].repeat(len(x[i]), 1)
+            for j in range(len(x[i])):
+                
+                output, (hidden_state, cell_state) = self.lstm_decoder(current_sequence)
+                #print(output.size())
+                output_f = torch.vstack([k[-1] for k in (output.T)])
+                #print(output_f.size())
+                decoded_outputs_temps.append(output_f)
+            decoded_outputs.append(decoded_outputs_temps)
+
+        return decoded_outputs, intput_embs
+
+
 class IntegratedModel(nn.Module):
+
     def __init__(self, 
                  word_to_idx,
                  in_dim_lstm,
