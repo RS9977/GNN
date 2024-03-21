@@ -181,8 +181,8 @@ class AutoEncoderHidden(nn.Module):
         
         int_dir = 2 if bidirectional else 1
         
-        self.lstm_decoder = nn.LSTM(input_size=hidden_dim*int_dir,
-                                    hidden_size=4,#output_size,
+        self.lstm_decoder = nn.LSTM(input_size=in_dim,
+                                    hidden_size=hidden_dim,#output_size,
                                     num_layers=num_layers,
                                     batch_first=True,
                                     bidirectional=bidirectional)
@@ -253,3 +253,196 @@ class IntegratedModel(nn.Module):
         gnn_output = self.gnn_model(graph)
         
         return gnn_output, out_act
+    
+
+class AE_rnn(nn.Module):
+    def __init__(self,
+                 word_to_idx,
+                 in_dim,
+                 hidden_dim,
+                 num_layers,
+                 bidirectional=True):
+        D = 2
+        N_max = len(word_to_idx)
+        super().__init__()
+        
+        self.word_to_idx = word_to_idx #identity mapping
+        vocab_size = len(word_to_idx)
+
+        self.emb = nn.Embedding(num_embeddings=vocab_size+1,
+                                embedding_dim=in_dim,
+                                padding_idx=-1)
+        self.emb2 = nn.Embedding(num_embeddings=vocab_size+1,
+                                embedding_dim=in_dim,
+                                padding_idx=-1)
+        
+        self.lstm = nn.LSTM(input_size=in_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=num_layers,
+                            batch_first=True,
+                            bidirectional=bidirectional)
+                
+        self.proj1 = nn.Linear(in_features=num_layers*2*hidden_dim,#state.shape[1],
+                   out_features=2*hidden_dim) #sorry for hard-coding here too
+        
+        self.proj2 = nn.Linear(in_features=num_layers*2*hidden_dim,#state.shape[1],
+                   out_features=2*hidden_dim)
+
+        self.dec   = nn.LSTM(input_size=1, #feeding integers
+              hidden_size = 13, #sorry for hard-coding
+              num_layers = 1,
+              batch_first=True,
+              bidirectional=True)
+        self.out   = nn.Linear(in_features=D*hidden_dim,
+                         out_features=N_max) #c_n -> output probabilities
+    def forward(self, x):
+        #x should be one array
+        #dim should be (1, len of sequence, embedding size) since lstm has batch_first=True
+        embs = torch.stack([self.emb(elem) for elem in x]).unsqueeze(0)
+        
+        out, (h_n, c_n) = self.lstm(embs)
+
+        state = c_n.reshape(1, -1)
+        
+        state_h = self.proj1(h_n.reshape(1, -1)).reshape(2, -1)
+        state_c = self.proj2(c_n.reshape(1, -1)).reshape(2, -1)
+
+
+        start_val = -1
+        outs = []
+        for i in range(x.shape[0]):
+            if i==0:
+                start_val=-1
+            else:
+                start_val = x[i-1].item()
+
+            if i==0:
+                out, (h_n, c_n) = self.dec(torch.tensor(start_val).unsqueeze(0).unsqueeze(1).float(), (state_h, state_c))
+            else:
+                out, (h_n, c_n) = self.dec(torch.tensor(start_val).unsqueeze(0).unsqueeze(1).float())
+
+            pred = self.out(out)
+            #outs.append(torch.argmax(pred, dim=1))
+            outs.append(pred.squeeze())
+        #print(outs)
+        #return torch.stack([self.emb(elem) for elem in outs]).squeeze(), embs.squeeze()
+        return torch.stack(outs), embs.squeeze()
+    
+
+
+class AE_gnnrnn(nn.Module):
+    def __init__(self,
+                 word_to_idx,
+                 in_dim,
+                 hidden_dim,
+                 num_layers,
+                 bidirectional=True):
+        D = 2
+        N_max = len(word_to_idx)
+        super().__init__()
+        
+        self.word_to_idx = word_to_idx #identity mapping
+        vocab_size = len(word_to_idx)
+
+        self.emb = nn.Embedding(num_embeddings=vocab_size+1,
+                                embedding_dim=in_dim,
+                                padding_idx=-1)
+        
+        self.lstm = nn.LSTM(input_size=in_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=num_layers,
+                            batch_first=True,
+                            bidirectional=bidirectional)
+        
+        self.gnn_model_h = GNNModel(in_dim=2*hidden_dim,
+                         out_dim=2*hidden_dim,
+                         layer_dims=[16, 32])
+        
+        self.gnn_model_c = GNNModel(in_dim=2*hidden_dim,
+                         out_dim=2*hidden_dim,
+                         layer_dims=[16, 32])
+
+        self.gnn_model = GNNModel(in_dim=4*hidden_dim,
+                         out_dim=4*hidden_dim,
+                         layer_dims=[16, 32])
+
+        self.proj1 = nn.Linear(in_features=num_layers*2*hidden_dim,#state.shape[1],
+                   out_features=2*hidden_dim) #sorry for hard-coding here too
+        
+        self.proj2 = nn.Linear(in_features=num_layers*2*hidden_dim,#state.shape[1],
+                   out_features=2*hidden_dim)
+
+        self.dec   = nn.LSTM(input_size=1, #feeding integers
+              hidden_size = 13, #sorry for hard-coding
+              num_layers = 1,
+              batch_first=True,
+              bidirectional=True)
+        self.out   = nn.Linear(in_features=D*hidden_dim,
+                         out_features=N_max) #c_n -> output probabilities
+    def forward(self, x, edge_index):
+        #x should be one array
+        #dim should be (1, len of sequence, embedding size) since lstm has batch_first=True
+        state_h_list = []
+        state_c_list = []
+        state_list   = []
+        for bb in x:
+            embs = torch.stack([self.emb(elem) for elem in bb]).unsqueeze(0)
+            out, (h_n, c_n) = self.lstm(embs)
+            state_h_bb = self.proj1(h_n.reshape(1, -1))
+            state_c_bb = self.proj2(c_n.reshape(1, -1))
+            state_h_list.append(state_h_bb)
+            state_c_list.append(state_c_bb)
+            state_list.append(torch.stack([state_h_bb, state_c_bb]).reshape(1,-1))
+
+        state_h_ten = torch.vstack(state_h_list)
+        state_c_ten = torch.vstack(state_c_list)
+        state_ten   = torch.vstack(state_list)
+
+        
+        graph_h = Data(edge_index=edge_index,
+                        x=state_h_ten)
+        
+        graph_c = Data(edge_index=edge_index,
+                        x=state_c_ten)
+        
+        graph = Data(edge_index=edge_index,
+                        x=state_ten)
+        
+        state_h_graph = self.gnn_model_h(graph_h)
+
+        state_c_graph = self.gnn_model_c(graph_c)
+
+        #state_graph   = self.gnn_model(graph)
+
+        outs = []
+        for k in range(state_h_graph.shape[0]):
+            outs_bb = []
+            start_val = -1
+            #print(state_graph.shape)
+            #print(state_h_graph.shape)
+
+            #state_h_graph = state_graph[:, 0:int(state_graph.shape[1]/2)]
+            #state_c_graph = state_graph[:, int(state_graph.shape[1]/2):int(state_graph.shape[1])]
+            #print(state_h_graph.shape)
+            state_h = state_h_graph[k].reshape(2, -1)
+            state_c = state_c_graph[k].reshape(2, -1)
+           
+            for i in range(x[k].shape[0]):
+                if i==0:
+                    start_val=-1
+                else:
+                    start_val = x[k][i-1].item()
+
+                if i==0:
+                    out, (h_n, c_n) = self.dec(torch.tensor(start_val).unsqueeze(0).unsqueeze(1).float(), (state_h, state_c))
+                else:
+                    out, (h_n, c_n) = self.dec(torch.tensor(start_val).unsqueeze(0).unsqueeze(1).float())
+
+                pred = self.out(out)
+                #outs.append(torch.argmax(pred, dim=1))
+                outs_bb.append(pred.squeeze())
+            #print("out_bb", torch.stack(outs_bb).shape)
+            outs.append(torch.stack(outs_bb))
+        #print(outs)
+        #return torch.stack([self.emb(elem) for elem in outs]).squeeze(), embs.squeeze()
+        return outs
